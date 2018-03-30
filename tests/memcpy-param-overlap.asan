@@ -1,0 +1,25 @@
+=================================================================
+==2434==ERROR: AddressSanitizer: memcpy-param-overlap: memory ranges [0x7fffffffdd00,0x7fffffffe0c5) and [0x7fffffffddb0, 0x7fffffffe175) overlap
+    #0 0x7ffff6e93425  (/usr/lib/x86_64-linux-gnu/libasan.so.4+0x79425)
+    #1 0x555555555491 in handleData1 /Development/ffw/vulnserver/vulnserver.c:20
+    #2 0x5555555556f4 in doprocessing /Development/ffw/vulnserver/vulnserver.c:51
+    #3 0x555555555bf5 in main /Development/ffw/vulnserver/vulnserver.c:114
+    #4 0x7ffff6a5b1c0 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x211c0)
+    #5 0x5555555552e9 in _start (/Development/ffw/vulnserver/bin/vulnserver_asan+0x12e9)
+
+Address 0x7fffffffdd00 is located in stack of thread T0 at offset 32 in frame
+    #0 0x5555555553f7 in handleData1 /Development/ffw/vulnserver/vulnserver.c:18
+
+  This frame has 1 object(s):
+    [32, 40) 'buff' <== Memory access at offset 32 partially overflows this variable
+HINT: this may be a false positive if your program uses some custom stack unwind mechanism or swapcontext
+      (longjmp and C++ exceptions *are* supported)
+Address 0x7fffffffddb0 is located in stack of thread T0 at offset 32 in frame
+    #0 0x555555555536 in doprocessing /Development/ffw/vulnserver/vulnserver.c:31
+
+  This frame has 1 object(s):
+    [32, 1056) 'data' <== Memory access at offset 32 is inside this variable
+HINT: this may be a false positive if your program uses some custom stack unwind mechanism or swapcontext
+      (longjmp and C++ exceptions *are* supported)
+SUMMARY: AddressSanitizer: memcpy-param-overlap (/usr/lib/x86_64-linux-gnu/libasan.so.4+0x79425) 
+==2434==ABORTING
