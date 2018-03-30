@@ -1,4 +1,6 @@
 import sys
+import re
+
 
 class AsanData:
     def __init__(self, data=None, fname=None, depth=5):
@@ -8,8 +10,10 @@ class AsanData:
         self.lines = [s.strip() for s in data.splitlines()]
 
         self.backtraceLines = [] 
+        self.backtraceShortLines = [] 
         self.headerLine = ""
 
+        # the actual data
         self.cause = ""
         self.cause_line = ""
         self.faultaddress = 0x0
@@ -28,13 +32,31 @@ class AsanData:
         # get backtrace
         n = 0
         line = None
+        didStart = False
         while n < len(self.lines):
             line = self.lines[n]
             if line.startswith("#"):
+                didStart = True
                 if "libasan" not in line:
-                    self.backtraceLines.append(line) 
+                    self.backtraceLines.append(line)
+                    self.backtraceShortLines.append( self.makeBacktraceLineShort(line))
+
+            # do not take ALL lines, only until first non-# line
+            else:
+                if didStart:
+                    break
 
             n += 1
+
+
+    def makeBacktraceLineShort(self, line):
+        lineSplit = line.split(" ")
+        bt = lineSplit[3] + " " + lineSplit[4]
+
+        # remove most of the path
+        bt = re.sub(r'/.*/', "", bt)
+
+        return bt
 
 
     def getCause(self):
@@ -61,40 +83,14 @@ class AsanData:
             btAddr = btlineArr[1]
             self.faultaddress = int (btAddr, 16)
 
-    def bla(self):
-        # backtrace
-        # typical:
-        # "#0 0x7fb6e9cddb60 in __interceptor_free (/usr/lib/x86_64-linux-gnu/libasan.so.3+0xc6b60)"
-        # "#1 0x55f0dffae17a in mg_mqtt_destroy_session ../../mongoose.c:10445"
-        # "#2 0x55f0dffae1ad in mg_mqtt_close_session ../../mongoose.c:10451"
-        # "#3 0x55f0dffaf162 in mg_mqtt_broker ../../mongoose.c:10587"
-        # new:
-        # "#0 0x55b0a2 (/home/dobin/ffw/mongoose_mqtt_69/bin/mqtt_broker+0x55b0a2)"
-        # "#1 0x55cf04 (/home/dobin/ffw/mongoose_mqtt_69/bin/mqtt_broker+0x55cf04)"
-        # "#2 0x55c793 (/home/dobin/ffw/mongoose_mqtt_69/bin/mqtt_broker+0x55c793)"
-        btStr = ""
-        btArr = []
-        # n already defined
-        while n < len(self.lines):
-            lineSplit = self.lines[n].split(" ")
-            if len(lineSplit) <= 3:
-                n += 1
-                continue
-            bt = lineSplit[2] + " " + lineSplit[3]
-
-            # remove most of the path
-            bt = re.sub(r'/.*/', "", bt)
-
-            btStr += bt + "\n"
-            btArr.append(bt)
-            n += 1
-        asanData["backtrace"] = btArr
-
-        return asanData
-
 
     def __str__(self):
-        return "AAA"
+        o = ""
+        o += "Cause: " + self.cause + "\n"
+        o += "Fault Address: " + str(hex(self.faultaddress)) + "\n"
+        o += "Stack trace: " + str(self.backtraceLines) + "\n"
+        o += "Stack trace short: " + str(self.backtraceShortLines) + "\n"
+        return o
 	
 
 def main():
@@ -105,9 +101,6 @@ def main():
     asanData = AsanData(fd.read(), fname=filename, depth=5)
 
     print asanData
-    print asanData.headerLine
-    print "---"
-    print asanData.backtraceLines
 
     fd.close()
 
