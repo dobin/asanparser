@@ -1,128 +1,116 @@
-#!/usr/bin/env python3
-"""
-Initial code from:
-  https://gist.github.com/bitrot-sh/5acbc7c154f0fc7cf2b8c02d41d5be41
-  No license
-  via https://bitrot.sh/post/08-12-2017-asan-root-cause-parser/
+import sys
 
-Usage: ./asanalyzer.py -d 5 '/home/user/asan_logs/*.log'
-
-Analyze multiple ASan report logs and classify them based on backtrace logs.
-ASLR should be disabled prior to running test cases.
-
-Default stack trace depth is 5. This can be changed by passing -d or --depth.
-"""
-
-from sys import exit
-from glob import glob
-from optparse import OptionParser
-
-DEBUG_ON = False
-
-def DEBUG(msg):
-    if DEBUG_ON:
-        print(msg)
-
-class AsanLog:
-    """Asan log parsing class.
-    Parameters:
-        data - (String) of data from asan log
-        fname - (String) Filename associated with the data
-        depth - (Int) stack trace depth
-    """
+class AsanData:
     def __init__(self, data=None, fname=None, depth=5):
-        self.data  = data
-        self.depth = depth
         self.fname = fname
-        self.stack = []
-        self.dups  = []
-        self.desc  = ""
-        if self.data:
-            self.get_description()
-            self.get_stack_trace()
-    
-    def get_description(self):
-        if not self.data:
-            return ""
-        data = self.data.splitlines()
-        for line in data:
-            if "ERROR:" in line:
-                self.desc = line[line.find('Sanitizer:')+11:]
-                break
-        return self.desc
+        self.data = data 
 
-    def get_stack_trace(self):
-        """Return a list of stack trace addresses"""
-        if not self.data:
-            return []
+        self.lines = [s.strip() for s in data.splitlines()]
 
-        if not self.has_stack_trace():
-            self.desc = "No ASAN Stack"
-            return []
+        self.backtraceLines = [] 
+        self.headerLine = ""
 
-        data = self.data.splitlines()
-        while "#0" not in data[0]:
-            data.pop(0)
-        for x in range(0, self.depth):
-            lno = "#%d" % x
-            if lno not in data[0]:
-                return self.stack
-            addr = data[0].lstrip(' ').split(' ')[1]
-            self.stack.append(addr)
-            data.pop(0)
-        return self.stack
+        self.cause = ""
+        self.cause_line = ""
+        self.faultaddress = 0x0
+        self.backtrace = "" 
 
-    def has_stack_trace(self):
-        """Return true if stack trace data is in self.data"""
-        return "#0" in self.data and "#1" in self.data
+        self.parseLines()
+        self.getCause()
+        self.getFaultaddress()
 
-    def compare_stack(self, log):
-        """Return true if stack trace (up to depth) is equal between self and log."""
-        if len(self.stack) != len(log.stack):
-            return False
-        
-        for x in range(0, len(self.stack)):
-            DEBUG("Stack Trace(%d): %s %s" % (x, self.stack[x], log.stack[x]))
-            if self.stack[x] != log.stack[x]:
-                return False
-        return True
 
-    def serialize(self):
-        """Return - (String) comma separated stack trace"""
-        if not self.stack:
-            return ""
-        return ','.join(self.stack)
+    def parseLines(self):
+        # get header line
+        # first line is just some ===, the second line is the important one
+        self.headerLine = self.lines[1]
+
+        # get backtrace
+        n = 0
+        line = None
+        while n < len(self.lines):
+            line = self.lines[n]
+            if line.startswith("#"):
+                if "libasan" not in line:
+                    self.backtraceLines.append(line) 
+
+            n += 1
+
+
+    def getCause(self):
+        if "heap-buffer-overflow" in self.headerLine:
+            self.cause = "Heap BoF"
+
+        if "attempting double-free" in self.headerLine:
+            self.cause = "DoubleFree"
+
+        if "heap-use-after-free" in self.headerLine:
+            self.cause = "UaF"
+
+
+    def getFaultaddress(self):
+        # "==58842==ERROR: AddressSanitizer: heap-buffer-overflow on address
+        #   0x60200000eed8 at pc 0x7f2c3ac7b033 bp 0x7ffd1e7630f0 sp 0x7ffd1e762898"
+        if 'memcpy-param-overlap' not in self.headerLine:
+            mainLine = self.headerLine.split(" ")
+            self.faultaddress = int( mainLine[9], 16)
+        else: 
+            # get by backtrace
+            btline = self.backtraceLines[0]
+            btlineArr = btline.split(" ")
+            btAddr = btlineArr[1]
+            self.faultaddress = int (btAddr, 16)
+
+    def bla(self):
+        # backtrace
+        # typical:
+        # "#0 0x7fb6e9cddb60 in __interceptor_free (/usr/lib/x86_64-linux-gnu/libasan.so.3+0xc6b60)"
+        # "#1 0x55f0dffae17a in mg_mqtt_destroy_session ../../mongoose.c:10445"
+        # "#2 0x55f0dffae1ad in mg_mqtt_close_session ../../mongoose.c:10451"
+        # "#3 0x55f0dffaf162 in mg_mqtt_broker ../../mongoose.c:10587"
+        # new:
+        # "#0 0x55b0a2 (/home/dobin/ffw/mongoose_mqtt_69/bin/mqtt_broker+0x55b0a2)"
+        # "#1 0x55cf04 (/home/dobin/ffw/mongoose_mqtt_69/bin/mqtt_broker+0x55cf04)"
+        # "#2 0x55c793 (/home/dobin/ffw/mongoose_mqtt_69/bin/mqtt_broker+0x55c793)"
+        btStr = ""
+        btArr = []
+        # n already defined
+        while n < len(self.lines):
+            lineSplit = self.lines[n].split(" ")
+            if len(lineSplit) <= 3:
+                n += 1
+                continue
+            bt = lineSplit[2] + " " + lineSplit[3]
+
+            # remove most of the path
+            bt = re.sub(r'/.*/', "", bt)
+
+            btStr += bt + "\n"
+            btArr.append(bt)
+            n += 1
+        asanData["backtrace"] = btArr
+
+        return asanData
+
+
+    def __str__(self):
+        return "AAA"
+	
 
 def main():
-    usage  = "usage: %prog '/home/user/asan_logs/*.log'"
-    parser = OptionParser(usage=usage)
-    parser.add_option('-d', '--depth', dest='depth', type='int', default=5, help='backtrace comparison depth')
-    (opts, args) = parser.parse_args()
-    if len(args) != 1:
-        parser.print_help()
-        exit()
+    filename = sys.argv[1]
 
-    files = glob(args[0])
-    logs  = []
-    for f in files:
-        found_stack = False
-        fd = open(f, 'r')
-        new_log = AsanLog(fd.read(), fname=f, depth=opts.depth)
-        fd.close()
-        for log in logs:
-            if log.compare_stack(new_log):
-                log.dups.append(f)
-                found_stack = True
-                break
-        if not found_stack:
-            logs.append(new_log)
+    print "Parsing: " + filename
+    fd = open(filename, 'r')
+    asanData = AsanData(fd.read(), fname=filename, depth=5)
 
-    for log in logs:
-        print("[-] Unique stack (%s)" % (log.fname))
-        print("\tDescription: %s" % log.desc)
-        print("\tDuplicates (%d)" % len(log.dups))
-        for dup in log.dups:
-            print("\t\t%s" % dup)
+    print asanData
+    print asanData.headerLine
+    print "---"
+    print asanData.backtraceLines
+
+    fd.close()
 
 if __name__=='__main__':
     main()
+
